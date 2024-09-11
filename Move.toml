@@ -1,0 +1,15 @@
+[package]
+name = 'multisig-utils'
+version = '1.0.0'
+
+[addresses]
+multisig_utils = "0xaac1791089281f454ac57db064385f785472313a65ac078eb9e5d62492dd70b8"
+std = "0x1"
+aptos_std = "0x1"
+aptos_framework = "0x1"
+
+[dependencies]
+AptosFramework = { git = 'https://github.com/aptos-labs/aptos-core.git', subdir = 'aptos-move/framework/aptos-framework', rev = '351918d1c8ab13db2b586851c480df1036593cfb' }
+AptosToken = { git = "https://github.com/aptos-labs/aptos-core.git", subdir = "aptos-move/framework/aptos-token/", rev = "351918d1c8ab13db2b586851c480df1036593cfb" }
+AptosStdlib = { git = "https://github.com/aptos-labs/aptos-core.git", subdir = "aptos-move/framework/aptos-stdlib/", rev = "351918d1c8ab13db2b586851c480df1036593cfb" }
+AptosTokenObjects = { git = "https://github.com/aptos-labs/aptos-core.git", subdir = "aptos-move/framework/aptos-token-objects/", rev = "351918d1c8ab13db2b586851c480df1036593cfb" }
