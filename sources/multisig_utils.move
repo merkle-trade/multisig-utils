@@ -1,6 +1,15 @@
 module multisig_utils::multisig_utils {
     use aptos_framework::multisig_account;
 
+    public entry fun flush_and_create_transaction_with_hash(
+        _owner: &signer,
+        _multisig_account: address,
+        _payload_hash: vector<u8>,
+    ) {
+        flush_pending_transactions(_owner, _multisig_account);
+        multisig_account::create_transaction_with_hash(_owner, _multisig_account, _payload_hash);
+    }
+
     public entry fun flush_and_create_transaction(
         _owner: &signer,
         _multisig_account: address,
