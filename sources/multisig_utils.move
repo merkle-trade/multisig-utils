@@ -10,14 +10,16 @@ module multisig_utils::multisig_utils {
         multisig_account::create_transaction(_owner, _multisig_account, _payload);
     }
 
-    fun flush_pending_transactions(
+    inline fun flush_pending_transactions(
         _owner: &signer,
         _multisig_account: address
     ) {
         let from_seq = multisig_account::last_resolved_sequence_number(_multisig_account) + 1;
         let to_seq = multisig_account::next_sequence_number(_multisig_account) - 1;
-        multisig_account::vote_transactions(_owner, _multisig_account, from_seq, to_seq, false); // reject all
-        multisig_account::execute_rejected_transactions(_owner, _multisig_account, to_seq);
+        if (from_seq < to_seq) {
+            multisig_account::vote_transactions(_owner, _multisig_account, from_seq, to_seq, false); // reject all
+            multisig_account::execute_rejected_transactions(_owner, _multisig_account, to_seq);
+        };
     }
 
     #[test_only]
