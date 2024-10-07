@@ -1,5 +1,34 @@
 module multisig_utils::multisig_utils {
+    use std::bcs;
+    use std::signer::address_of;
+    use std::string::String;
+    use std::vector;
+    use aptos_framework::account;
     use aptos_framework::multisig_account;
+    use aptos_framework::object::{Self, ExtendRef};
+
+    const DOMAIN_SEPARATOR: vector<u8> = b"aptos_framework::multisig_account";
+
+    struct MasterObject has key {
+        extend_ref: ExtendRef
+    }
+    struct MultisigObj has key {}
+
+    /// When signer is not owner of module
+    const E_NOT_AUTHORIZED: u64 = 0;
+
+    public entry fun initialize_master_object(_admin: &signer) {
+        assert!(@multisig_utils == address_of(_admin), E_NOT_AUTHORIZED);
+
+        let constructor_ref = object::create_named_object(_admin, b"");
+        let extend_ref = object::generate_extend_ref(&constructor_ref);
+        let signer = object::generate_signer(&constructor_ref);
+        move_to(&signer, MultisigObj {});
+
+        let object = object::object_from_constructor_ref<MultisigObj>(&constructor_ref);
+        object::transfer(_admin, object, @0x0); // remove ownership
+        move_to(_admin, MasterObject { extend_ref });
+    }
 
     public entry fun flush_and_create_transaction_with_hash(
         _owner: &signer,
@@ -31,12 +60,50 @@ module multisig_utils::multisig_utils {
         };
     }
 
+    public entry fun create_multisig_account(
+        owner: &signer,
+        num_signatures_required: u64,
+        metadata_keys: vector<String>,
+        metadata_values: vector<vector<u8>>,
+    ) acquires MasterObject {
+        let owner_address = address_of(owner);
+        let master_object = borrow_global<MasterObject>(@multisig_utils);
+        let master_object_signer = object::generate_signer_for_extending(&master_object.extend_ref);
+
+        let (child_signer, _) = account::create_resource_account(&master_object_signer, bcs::to_bytes(&owner_address));
+        multisig_account::create_with_owners_then_remove_bootstrapper(
+            &child_signer,
+            vector[owner_address],
+            num_signatures_required,
+            metadata_keys,
+            metadata_values,
+        );
+    }
+
+    #[view]
+    public fun get_next_multisig_account_address(_owner_address: address): address acquires MasterObject {
+        let master_object = borrow_global<MasterObject>(@multisig_utils);
+        let master_object_signer = object::generate_signer_for_extending(&master_object.extend_ref);
+        let child_address = account::create_resource_address(&address_of(&master_object_signer), bcs::to_bytes(&_owner_address));
+
+        let nonce = 0;
+        if (account::exists_at(child_address)) {
+            nonce = account::get_sequence_number(_owner_address);
+        };
+        return account::create_resource_address(&child_address, create_multisig_account_seed(bcs::to_bytes(&nonce)))
+    }
+
+    fun create_multisig_account_seed(seed: vector<u8>): vector<u8> {
+        // Generate a seed that will be used to create the resource account that hosts the multisig account.
+        let multisig_account_seed = vector::empty<u8>();
+        vector::append(&mut multisig_account_seed, DOMAIN_SEPARATOR);
+        vector::append(&mut multisig_account_seed, seed);
+
+        multisig_account_seed
+    }
+
     #[test_only]
     use std::features;
-    #[test_only]
-    use std::signer::address_of;
-    #[test_only]
-    use std::vector;
     #[test_only]
     use aptos_framework::aptos_account;
     #[test_only]
@@ -71,5 +138,25 @@ module multisig_utils::multisig_utils {
         pending_txs = multisig_account::get_pending_transactions(multisig_addr);
         assert!(vector::length(&pending_txs) == 1, 0);
         assert!(multisig_account::next_sequence_number(multisig_addr) == 5, 0);
+    }
+
+    #[test(admin = @multisig_utils, aptos_framework = @aptos_framework, coffee = @0xC0FFEE)]
+    fun T_create_multisig(admin: &signer, aptos_framework: &signer, coffee: &signer) acquires MasterObject {
+        timestamp::set_time_has_started_for_testing(aptos_framework);
+        aptos_coin::ensure_initialized_with_apt_fa_metadata_for_test();
+        aptos_account::create_account(address_of(admin));
+        aptos_account::create_account(address_of(coffee));
+        features::change_feature_flags_for_testing(aptos_framework, vector[features::get_auids()], vector[]);
+
+        initialize_master_object(admin);
+
+        let multisig_addr = get_next_multisig_account_address(address_of(coffee));
+        create_multisig_account(coffee, 1, vector[], vector[]);
+
+        let payload: vector<u8> = vector[1, 2, 3];
+        multisig_account::create_transaction(coffee, multisig_addr, payload);
+
+        let pending_txs = multisig_account::get_pending_transactions(multisig_addr);
+        assert!(vector::length(&pending_txs) == 1, 0);
     }
 }
