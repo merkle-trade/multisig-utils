@@ -3,7 +3,7 @@ name = 'multisig-utils'
 version = '1.0.0'
 
 [addresses]
-multisig_utils = "0xaac1791089281f454ac57db064385f785472313a65ac078eb9e5d62492dd70b8"
+multisig_utils = "0x227bef3eb77e5700dccbaa6bc1cdc854433efc9b998be1cd9074befefa97c89c"
 std = "0x1"
 aptos_std = "0x1"
 aptos_framework = "0x1"
