@@ -2,32 +2,23 @@ module multisig_utils::multisig_utils {
     use std::bcs;
     use std::signer::address_of;
     use std::string::String;
-    use std::vector;
     use aptos_framework::account;
+    use aptos_framework::account::SignerCapability;
+    use aptos_framework::aptos_account;
     use aptos_framework::multisig_account;
-    use aptos_framework::object::{Self, ExtendRef};
 
-    const DOMAIN_SEPARATOR: vector<u8> = b"aptos_framework::multisig_account";
-
-    struct MasterObject has key {
-        extend_ref: ExtendRef
+    struct MasterSignerCap has key {
+        signer_cap: SignerCapability
     }
-    struct MultisigObj has key {}
+    const MasterSeed: vector<u8> = b"master_resource_account";
 
     /// When signer is not owner of module
     const E_NOT_AUTHORIZED: u64 = 0;
 
     public entry fun initialize_master_object(_admin: &signer) {
         assert!(@multisig_utils == address_of(_admin), E_NOT_AUTHORIZED);
-
-        let constructor_ref = object::create_named_object(_admin, b"");
-        let extend_ref = object::generate_extend_ref(&constructor_ref);
-        let signer = object::generate_signer(&constructor_ref);
-        move_to(&signer, MultisigObj {});
-
-        let object = object::object_from_constructor_ref<MultisigObj>(&constructor_ref);
-        object::transfer(_admin, object, @0x0); // remove ownership
-        move_to(_admin, MasterObject { extend_ref });
+        let (_, master_signer_cap) = account::create_resource_account(_admin, MasterSeed);
+        move_to(_admin, MasterSignerCap { signer_cap: master_signer_cap });
     }
 
     public entry fun flush_and_create_transaction_with_hash(
@@ -65,12 +56,16 @@ module multisig_utils::multisig_utils {
         num_signatures_required: u64,
         metadata_keys: vector<String>,
         metadata_values: vector<vector<u8>>,
-    ) acquires MasterObject {
+    ) acquires MasterSignerCap {
         let owner_address = address_of(owner);
-        let master_object = borrow_global<MasterObject>(@multisig_utils);
-        let master_object_signer = object::generate_signer_for_extending(&master_object.extend_ref);
+        let master_signer_cap = borrow_global<MasterSignerCap>(@multisig_utils);
+        let master_signer = account::create_signer_with_capability(&master_signer_cap.signer_cap);
+        let (child_signer, _) = account::create_resource_account(&master_signer, bcs::to_bytes(&owner_address));
 
-        let (child_signer, _) = account::create_resource_account(&master_object_signer, bcs::to_bytes(&owner_address));
+        let child_address = address_of(&child_signer);
+        if (!account::exists_at(child_address)) {
+            aptos_account::create_account(child_address);
+        };
         multisig_account::create_with_owners_then_remove_bootstrapper(
             &child_signer,
             vector[owner_address],
@@ -81,31 +76,20 @@ module multisig_utils::multisig_utils {
     }
 
     #[view]
-    public fun get_next_multisig_account_address(_owner_address: address): address acquires MasterObject {
-        let master_object = borrow_global<MasterObject>(@multisig_utils);
-        let master_object_signer = object::generate_signer_for_extending(&master_object.extend_ref);
-        let child_address = account::create_resource_address(&address_of(&master_object_signer), bcs::to_bytes(&_owner_address));
-
-        let nonce = 0;
-        if (account::exists_at(child_address)) {
-            nonce = account::get_sequence_number(_owner_address);
+    public fun get_next_multisig_account_address(_owner_address: address): address acquires MasterSignerCap {
+        let master_signer_cap = borrow_global<MasterSignerCap>(@multisig_utils);
+        let master_signer = account::create_signer_with_capability(&master_signer_cap.signer_cap);
+        let child_address = account::create_resource_address(&address_of(&master_signer), bcs::to_bytes(&_owner_address));
+        if (!account::exists_at(child_address)) {
+            aptos_account::create_account(child_address);
         };
-        return account::create_resource_address(&child_address, create_multisig_account_seed(bcs::to_bytes(&nonce)))
-    }
-
-    fun create_multisig_account_seed(seed: vector<u8>): vector<u8> {
-        // Generate a seed that will be used to create the resource account that hosts the multisig account.
-        let multisig_account_seed = vector::empty<u8>();
-        vector::append(&mut multisig_account_seed, DOMAIN_SEPARATOR);
-        vector::append(&mut multisig_account_seed, seed);
-
-        multisig_account_seed
+        return multisig_account::get_next_multisig_account_address(child_address)
     }
 
     #[test_only]
     use std::features;
     #[test_only]
-    use aptos_framework::aptos_account;
+    use std::vector;
     #[test_only]
     use aptos_framework::aptos_coin;
     #[test_only]
@@ -141,7 +125,7 @@ module multisig_utils::multisig_utils {
     }
 
     #[test(admin = @multisig_utils, aptos_framework = @aptos_framework, coffee = @0xC0FFEE)]
-    fun T_create_multisig(admin: &signer, aptos_framework: &signer, coffee: &signer) acquires MasterObject {
+    fun T_create_multisig(admin: &signer, aptos_framework: &signer, coffee: &signer) acquires MasterSignerCap {
         timestamp::set_time_has_started_for_testing(aptos_framework);
         aptos_coin::ensure_initialized_with_apt_fa_metadata_for_test();
         aptos_account::create_account(address_of(admin));
